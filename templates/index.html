@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>한국어 Llama RAG 시스템</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            padding-top: 20px;
+        }
+        .container {
+            max-width: 900px;
+        }
+        .card {
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .answer-card {
+            border-left: 5px solid #007bff;
+        }
+        .document-source {
+            border-left: 5px solid #28a745;
+        }
+        .search-source {
+            border-left: 5px solid #ffc107;
+        }
+        .reference-item {
+            font-size: 0.9rem;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        #system-status {
+            font-size: 0.9rem;
+            margin-bottom: 20px;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        .status-green {
+            background-color: #28a745;
+        }
+        .status-red {
+            background-color: #dc3545;
+        }
+        .status-yellow {
+            background-color: #ffc107;
+        }
+        #loading-indicator {
+            display: none;
+        }
+        #response-area {
+            display: none;
+        }
+        .status-item {
+            display: inline-block;
+            margin-right: 15px;
+        }
+        .model-info {
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-top: 10px;
+        }
+        /* 답변 텍스트 영역 스타일 개선 */
+        #answer-text {
+            line-height: 1.6;
+            font-size: 1.05rem;
+        }
+
+        #answer-text p {
+            margin-bottom: 0.8rem;
+        }
+
+        #answer-text strong {
+            color: #0056b3;
+        }
+
+        #answer-text em {
+            color: #6c757d;
+        }
+
+        #answer-text a {
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
+        /* 목록 스타일 개선 */
+        #answer-text ul, #answer-text ol {
+            padding-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        #answer-text li {
+            margin-bottom: 0.5rem;
+        }
+
+        /* 인용문 스타일 */
+        #answer-text blockquote {
+            border-left: 3px solid #dee2e6;
+            padding-left: 1rem;
+            color: #6c757d;
+            font-style: italic;
+            margin: 1rem 0;
+        }
+
+        /* 참조 섹션 구분 */
+        #answer-text hr {
+            margin: 1.5rem 0 1rem 0;
+            border-color: #e9ecef;
+        }
+
+        /* 코드나 강조 부분 */
+        #answer-text code {
+            background-color: #f8f9fa;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: Consolas, monospace;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">한국어 Llama RAG 시스템</h1>
+
+        <div class="model-info text-center mb-3">
+            <p>모델: torchtorchkimtorch-Llama-3.2-Korean-GGACHI-1B-Instruct-v1 | 임베딩: ko-sroberta-multitask</p>
+        </div>
+
+        <div id="system-status" class="text-center mb-4">
+            <div class="status-item">
+                <span class="status-indicator status-red" id="rag-status"></span>
+                <span id="rag-status-text">RAG 시스템 준비 중...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-red" id="model-status"></span>
+                <span id="model-status-text">모델 확인 중...</span>
+            </div>
+            <div class="status-item">
+                <span class="status-indicator status-red" id="embedding-status"></span>
+                <span id="embedding-status-text">임베딩 모델 확인 중...</span>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>PDF 파일 업로드</h5>
+            </div>
+            <div class="card-body">
+                <form id="upload-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="pdf-file" class="form-label">PDF 파일 선택</label>
+                        <input class="form-control" type="file" id="pdf-file" accept=".pdf" required>
+                        <div class="form-text">최대 16MB 크기의 PDF 파일을 업로드해주세요.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">업로드</button>
+                </form>
+                <div id="upload-status" class="mt-3"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>질문하기</h5>
+            </div>
+            <div class="card-body">
+                <form id="question-form">
+                    <div class="mb-3">
+                        <label for="question" class="form-label">질문</label>
+                        <input type="text" class="form-control" id="question" placeholder="PDF 내용 또는 관련 정보를 질문해보세요." required>
+                    </div>
+                    <button type="submit" class="btn btn-success" id="submit-question">질문하기</button>
+                    <div id="loading-indicator" class="spinner-border text-primary mt-3" role="status">
+                        <span class="visually-hidden">로딩 중...</span>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="response-area" class="mt-4">
+            <div class="card answer-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">답변</h5>
+                    <div>
+                        <span id="answer-source-badge" class="badge"></span>
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="copy-answer-btn">
+                            <i class="bi bi-clipboard"></i> 복사
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div id="answer-text" class="answer-container"></div>
+
+                    <!-- 키워드 하이라이트 영역 추가 -->
+                    <div class="mt-3 mb-2" id="keywords-area" style="display: none;">
+                        <h6 class="text-muted mb-2">주요 키워드</h6>
+                        <div id="keywords-content" class="d-flex flex-wrap gap-2"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="references-area">
+                <!-- 참조 문서 또는 검색 결과가 여기에 표시됩니다 -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 답변 텍스트 포맷팅 함수
+        function formatAnswer(text) {
+            if (!text) return '';
+
+            // 1. 줄바꿈 처리
+            let formatted = text.replace(/\n/g, '<br>');
+
+            // 2. 숫자 목록 강조 (예: "1. 항목")
+            formatted = formatted.replace(/(\d+\.\s)([^\n<]+)/g, '<strong>$1</strong>$2');
+
+            // 3. URL 링크 자동 변환
+            formatted = formatted.replace(
+                /(https?:\/\/[^\s<]+)/g,
+                '<a href="$1" target="_blank" class="text-primary">$1</a>'
+            );
+
+            // 4. 문단 구분 개선 (빈 줄을 문단 구분으로 처리)
+            formatted = formatted.replace(/<br><br>/g, '</p><p class="mt-3">');
+
+            // 5. 구분선이나 참조 표시 추가
+            formatted = formatted.replace(/(출처:|참조:|Source:|Reference:)/g, '<hr class="my-2"><strong>$1</strong>');
+
+            // 6. 강조 표시 (따옴표로 묶인 부분)
+            formatted = formatted.replace(/"([^"]+)"/g, '<em>"$1"</em>');
+
+            // 7. 최종 결과를 <p> 태그로 감싸기
+            return `<p>${formatted}</p>`;
+        }
+
+        // 답변 복사 기능
+        document.addEventListener('DOMContentLoaded', function() {
+            // 복사 버튼 이벤트 리스너 추가
+            document.getElementById('copy-answer-btn').addEventListener('click', function() {
+                const answerText = document.getElementById('answer-text').innerText;
+                copyTextToClipboard(answerText);
+
+                // 복사 성공 표시
+                const originalText = this.innerHTML;
+                this.innerHTML = '<i class="bi bi-check"></i> 복사됨';
+                this.classList.remove('btn-outline-secondary');
+                this.classList.add('btn-success');
+
+                // 3초 후 원래 상태로 복귀
+                setTimeout(() => {
+                    this.innerHTML = originalText;
+                    this.classList.remove('btn-success');
+                    this.classList.add('btn-outline-secondary');
+                }, 3000);
+            });
+        });
+
+        // 클립보드에 텍스트 복사 함수
+        function copyTextToClipboard(text) {
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                document.execCommand('copy');
+            } catch (err) {
+                console.error('클립보드 복사 실패:', err);
+            }
+
+            document.body.removeChild(textArea);
+        }
+
+        // 주요 키워드 추출 함수
+        function extractKeywords(text) {
+            if (!text) return [];
+
+            // 불용어 목록 (한국어 + 영어)
+            const stopWords = [
+                '이', '그', '저', '것', '이것', '저것', '그것', '에', '에서', '의', '을', '를', '은', '는',
+                '이다', '있다', '하다', '되다', '있는', '없는', '때문에', '그리고', '하지만', '또한',
+                'the', 'a', 'an', 'of', 'in', 'on', 'at', 'to', 'for', 'with', 'by', 'and', 'or', 'but'
+            ];
+
+            // 텍스트 정제
+            const cleanText = text.replace(/[^\w\s가-힣]/g, ' ').toLowerCase();
+
+            // 단어 분리 및 불용어 제거
+            const words = cleanText.split(/\s+/)
+                .filter(word => word.length > 1) // 1글자 단어 제거
+                .filter(word => !stopWords.includes(word)); // 불용어 제거
+
+            // 단어 빈도 계산
+            const wordFrequency = {};
+            words.forEach(word => {
+                wordFrequency[word] = (wordFrequency[word] || 0) + 1;
+            });
+
+            // 빈도순으로 정렬
+            const sortedWords = Object.keys(wordFrequency).sort((a, b) => wordFrequency[b] - wordFrequency[a]);
+
+            // 상위 8개 단어 반환
+            return sortedWords.slice(0, 8);
+        }
+
+        // 키워드 표시 함수
+        function displayKeywords(text) {
+            const keywords = extractKeywords(text);
+
+            if (keywords.length === 0) {
+                document.getElementById('keywords-area').style.display = 'none';
+                return;
+            }
+
+            const keywordsContent = document.getElementById('keywords-content');
+            keywordsContent.innerHTML = '';
+
+            keywords.forEach(keyword => {
+                const keywordSpan = document.createElement('span');
+                keywordSpan.className = 'badge bg-light text-dark';
+                keywordSpan.textContent = keyword;
+                keywordsContent.appendChild(keywordSpan);
+            });
+
+            document.getElementById('keywords-area').style.display = 'block';
+        }
+
+        // 시스템 상태 확인
+        function checkSystemStatus() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    // RAG 시스템 상태
+                    const ragStatus = document.getElementById('rag-status');
+                    const ragStatusText = document.getElementById('rag-status-text');
+
+                    if (data.system_ready) {
+                        ragStatus.className = 'status-indicator status-green';
+                        ragStatusText.textContent = 'RAG 시스템 준비 완료';
+                        document.getElementById('submit-question').disabled = false;
+                    } else {
+                        ragStatus.className = 'status-indicator status-yellow';
+                        ragStatusText.textContent = 'PDF를 업로드하여 RAG 시스템을 초기화해주세요';
+                        document.getElementById('submit-question').disabled = true;
+                    }
+
+                    // 모델 상태
+                    const modelStatus = document.getElementById('model-status');
+                    const modelStatusText = document.getElementById('model-status-text');
+
+                    if (data.model_ready) {
+                        modelStatus.className = 'status-indicator status-green';
+                        modelStatusText.textContent = 'Llama 모델 준비 완료';
+                    } else {
+                        modelStatus.className = 'status-indicator status-red';
+                        modelStatusText.textContent = 'Llama 모델을 찾을 수 없습니다';
+                    }
+
+                    // 임베딩 모델 상태
+                    const embeddingStatus = document.getElementById('embedding-status');
+                    const embeddingStatusText = document.getElementById('embedding-status-text');
+
+                    if (data.embedding_ready) {
+                        embeddingStatus.className = 'status-indicator status-green';
+                        embeddingStatusText.textContent = '임베딩 모델 준비 완료';
+                    } else {
+                        embeddingStatus.className = 'status-indicator status-red';
+                        embeddingStatusText.textContent = '임베딩 모델을 찾을 수 없습니다';
+                    }
+                })
+                .catch(error => {
+                    console.error('상태 확인 중 오류 발생:', error);
+                });
+        }
+
+        // 페이지 로드 시 상태 확인
+        document.addEventListener('DOMContentLoaded', function() {
+            checkSystemStatus();
+            setInterval(checkSystemStatus, 5000); // 5초마다 상태 확인
+        });
+
+        // PDF 업로드 처리
+        document.getElementById('upload-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const fileInput = document.getElementById('pdf-file');
+            const file = fileInput.files[0];
+
+            if (!file) {
+                alert('파일을 선택해주세요.');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const uploadStatus = document.getElementById('upload-status');
+            uploadStatus.innerHTML = '<div class="alert alert-info">PDF 파일 업로드 중...</div>';
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    uploadStatus.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+                    // 5초 후 상태 확인
+                    setTimeout(checkSystemStatus, 5000);
+                } else {
+                    uploadStatus.innerHTML = `<div class="alert alert-danger">${data.error}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('업로드 중 오류 발생:', error);
+                uploadStatus.innerHTML = '<div class="alert alert-danger">업로드 중 오류가 발생했습니다.</div>';
+            });
+        });
+
+        // 질문 처리
+        document.getElementById('question-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const question = document.getElementById('question').value.trim();
+
+            if (!question) {
+                alert('질문을 입력해주세요.');
+                return;
+            }
+
+            // 로딩 표시
+            document.getElementById('loading-indicator').style.display = 'inline-block';
+            document.getElementById('submit-question').disabled = true;
+            document.getElementById('response-area').style.display = 'none';
+
+            fetch('/ask', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ question: question })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // 로딩 표시 제거
+                document.getElementById('loading-indicator').style.display = 'none';
+                document.getElementById('submit-question').disabled = false;
+
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                // 답변 표시
+                const answerText = data.answer;
+                const formattedAnswer = formatAnswer(answerText);
+                document.getElementById('answer-text').innerHTML = formattedAnswer;
+                displayKeywords(data.answer);
+
+                // 소스 배지 설정
+                const sourceBadge = document.getElementById('answer-source-badge');
+                if (data.source === 'document') {
+                    sourceBadge.textContent = 'PDF 문서 기반';
+                    sourceBadge.className = 'badge bg-success';
+                } else if (data.source === 'search') {
+                    sourceBadge.textContent = '검색 기반';
+                    sourceBadge.className = 'badge bg-warning text-dark';
+                } else {
+                    sourceBadge.textContent = '정보 없음';
+                    sourceBadge.className = 'badge bg-secondary';
+                }
+
+                // 참조 정보 표시
+                const referencesArea = document.getElementById('references-area');
+                referencesArea.innerHTML = '';
+
+                if (data.references && data.references.length > 0) {
+                    const referenceTitle = document.createElement('h5');
+                    referenceTitle.className = 'mt-3 mb-3';
+                    referenceTitle.textContent = data.source === 'document' ? '참조 문서' : '검색 결과';
+                    referencesArea.appendChild(referenceTitle);
+
+                    data.references.forEach(ref => {
+                        const refDiv = document.createElement('div');
+                        refDiv.className = `reference-item ${data.source === 'document' ? 'document-source' : 'search-source'}`;
+
+                        if (data.source === 'document') {
+                            refDiv.textContent = ref.content;
+                        } else {
+                            const title = document.createElement('strong');
+                            title.textContent = ref.title;
+
+                            const snippet = document.createElement('p');
+                            snippet.textContent = ref.snippet;
+
+                            const link = document.createElement('a');
+                            link.href = ref.url;
+                            link.textContent = '출처 링크';
+                            link.target = '_blank';
+
+                            refDiv.appendChild(title);
+                            refDiv.appendChild(snippet);
+                            refDiv.appendChild(link);
+                        }
+
+                        referencesArea.appendChild(refDiv);
+                    });
+                }
+
+                // 답변 영역 표시
+                document.getElementById('response-area').style.display = 'block';
+            })
+            .catch(error => {
+                console.error('질문 처리 중 오류 발생:', error);
+                document.getElementById('loading-indicator').style.display = 'none';
+                document.getElementById('submit-question').disabled = false;
+                alert('질문 처리 중 오류가 발생했습니다.');
+            });
+        });
+    </script>
+</body>
+</html>

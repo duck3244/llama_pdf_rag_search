@@ -1,0 +1,28 @@
+# 기본 라이브러리
+flask==2.3.3
+werkzeug==2.3.7
+
+# LangChain 및 관련 패키지
+langchain==0.1.0
+langchain_community==0.0.13
+langchain_core==0.1.14
+langchain_text_splitters==0.0.1
+
+# PDF 처리
+pymupdf==1.23.7
+
+# 벡터 저장소
+faiss-cpu==1.7.4
+
+# 임베딩
+sentence-transformers==2.2.2
+
+# LLM 모델
+transformers==4.36.2
+accelerate==0.25.0
+torch==2.1.0
+
+# 검색 기능
+duckduckgo-search==3.9.9
+beautifulsoup4==4.12.2
+requests==2.31.0
