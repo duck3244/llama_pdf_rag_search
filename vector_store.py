@@ -5,8 +5,9 @@ import logging
 from typing import List
 from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
 
-from config import EMBEDDING_MODEL_NAME
+from config import EMBEDDING_MODEL_NAME, VECTOR_DB_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,8 @@ class VectorStoreManager:
             import sentence_transformers
             self.model = sentence_transformers.SentenceTransformer(embedding_model_name)
 
-            # 커스텀 임베딩 클래스 생성
-            class CustomEmbeddings:
+            # 커스텀 임베딩 클래스 생성 (langchain Embeddings 인터페이스 준수)
+            class CustomEmbeddings(Embeddings):
                 def __init__(self, st_model):
                     self.model = st_model
 
@@ -82,20 +83,27 @@ class VectorStoreManager:
 
 
     def load_vector_store(self, load_path: str) -> FAISS:
-        """저장된 벡터 저장소를 로드하는 함수"""
+        """저장된 벡터 저장소를 로드하는 함수.
+
+        pickle 기반 역직렬화를 수행하므로, 본 애플리케이션이 VECTOR_DB_PATH
+        아래에 직접 저장한 저장소만 로드한다. 외부 경로는 거부.
+        """
         logger.info(f"벡터 저장소를 불러오는 중: {load_path}")
 
-        # allow_dangerous_deserialization 파라미터를 True로 설정하여 보안 경고 우회
-        # 참고: 신뢰할 수 있는 소스에서만 이 옵션을 사용하세요
-        try:
-            return FAISS.load_local(
-                load_path,
-                self.embeddings,
-                allow_dangerous_deserialization=True
+        if not os.path.isdir(load_path):
+            raise FileNotFoundError(f"벡터 저장소 경로가 존재하지 않습니다: {load_path}")
+
+        # path traversal / 외부 경로 차단: VECTOR_DB_PATH 하위만 허용
+        base = os.path.realpath(VECTOR_DB_PATH)
+        target = os.path.realpath(load_path)
+        if os.path.commonpath([base, target]) != base:
+            raise ValueError(
+                f"허용되지 않은 벡터 저장소 경로입니다: {load_path}"
             )
-        except Exception as e:
-            logger.error(f"벡터 저장소 로드 실패: {e}")
-            logger.info("새 벡터 저장소를 생성합니다.")
-            # 로드에 실패하면 빈 벡터 저장소 반환
-            return FAISS.from_texts(["더미 텍스트"], self.embeddings)
+
+        return FAISS.load_local(
+            load_path,
+            self.embeddings,
+            allow_dangerous_deserialization=True,
+        )
 

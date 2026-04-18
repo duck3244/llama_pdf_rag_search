@@ -9,6 +9,24 @@ from config import CHUNK_SIZE, CHUNK_OVERLAP
 
 logger = logging.getLogger(__name__)
 
+PDF_MAGIC = b"%PDF-"
+
+
+def is_valid_pdf(pdf_path: str) -> bool:
+    """PDF 파일의 유효성을 검증 (매직 바이트 + 구조 확인)."""
+    try:
+        with open(pdf_path, "rb") as f:
+            header = f.read(len(PDF_MAGIC))
+        if header != PDF_MAGIC:
+            return False
+        with fitz.open(pdf_path) as doc:
+            if doc.is_encrypted or doc.page_count < 1:
+                return False
+        return True
+    except Exception as e:
+        logger.warning(f"PDF 유효성 검증 실패: {e}")
+        return False
+
 
 class PDFProcessor:
     """PDF 파일을 처리하여 텍스트 추출 및 청크로 분할하는 클래스"""

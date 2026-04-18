@@ -29,18 +29,18 @@ class KoreanLlamaRAG:
         self.retriever = vector_store.as_retriever(search_kwargs={"k": RETRIEVAL_TOP_K})
         self.search_engine = search_engine
 
-        # RAG 프롬프트 템플릿 (한국어 버전)
-        self.rag_prompt_template = """
-당신은 제공된 문서 내용과 질문을 바탕으로 답변하는 도우미입니다.
+        # RAG 프롬프트 템플릿 (한국어)
+        # 의도적으로 "없을 경우" 분기를 제시하지 않는다. 소형 모델은 그 옵션이
+        # 있으면 회피로 기울어지므로, 문서 기반 답변에만 집중시키고 관련성이
+        # 낮을 때의 폴백은 상위 로직(answer_question)에서 처리한다.
+        self.rag_prompt_template = """다음 문서를 참고하여 질문에 한국어로 구체적으로 답하세요. 문서에 등장한 장소/이름/특징을 최대한 활용하세요.
 
-문서 내용:
+[문서]
 {context}
 
-질문: {question}
+[질문] {question}
 
-제공된 문서 내용을 기반으로 답변해주세요. 문서에 관련 정보가 없는 경우 "제공된 문서에서 이 정보를 찾을 수 없습니다"라고 답변하세요.
-답변:
-"""
+[답변]"""
 
         self.search_prompt_template = """
 다음의 검색 결과와 질문을 바탕으로 답변해주세요.
@@ -77,10 +77,15 @@ class KoreanLlamaRAG:
             docs = self.retriever.get_relevant_documents(question)
 
             # 답변 생성
-            answer = self.qa_chain.invoke(question)
+            answer = self.qa_chain.invoke(question).strip()
 
-            # 문서에서 정보를 찾지 못했는지 확인
-            if "제공된 문서에서 이 정보를 찾을 수 없습니다" in answer and self.search_engine:
+            # 문서에서 정보를 찾지 못한 시그널: 답변이 비어있거나 "찾을 수 없" 패턴 포함
+            not_found = (
+                not answer
+                or "찾을 수 없" in answer
+                or "정보가 없" in answer
+            )
+            if not_found and self.search_engine:
                 logger.info("문서에서 정보를 찾지 못했습니다. 검색 엔진을 사용합니다.")
                 return self._search_and_answer(question)
 
@@ -90,11 +95,11 @@ class KoreanLlamaRAG:
                 "source_documents": docs
             }
 
-        except Exception as e:
-            logger.error(f"답변 생성 중 오류 발생: {e}")
+        except Exception:
+            logger.exception("답변 생성 중 오류 발생")
             if self.search_engine:
                 return self._search_and_answer(question)
-            return {"answer": f"오류가 발생했습니다: {str(e)}", "source": "error"}
+            return {"answer": "답변 생성 중 오류가 발생했습니다.", "source": "error"}
 
 
     def _search_and_answer(self, question: str) -> Dict[str, Any]:
@@ -110,6 +115,18 @@ class KoreanLlamaRAG:
                 "source": "none"
             }
 
+        # 본문이 짧은 결과의 URL만 선별해 병렬로 페이지 내용 조회
+        urls_to_fetch = [
+            r.get("href", "")
+            for r in search_results
+            if r.get("href") and len(r.get("body", "")) < 100
+        ]
+        page_contents = (
+            self.search_engine.get_webpage_contents(urls_to_fetch)
+            if urls_to_fetch
+            else {}
+        )
+
         # 검색 결과 텍스트 구성
         search_content = ""
         for i, result in enumerate(search_results, 1):
@@ -119,11 +136,9 @@ class KoreanLlamaRAG:
 
             search_content += f"{i}. {title}\n{body}\n출처: {url}\n\n"
 
-            # 필요한 경우 웹페이지 내용 추가 가져오기
-            if len(body) < 100 and url:  # 본문이 짧은 경우
-                page_content = self.search_engine.get_webpage_content(url)
-                if page_content:
-                    search_content += f"추가 내용: {page_content[:1000]}...\n\n"
+            page_content = page_contents.get(url)
+            if page_content:
+                search_content += f"추가 내용: {page_content[:1000]}...\n\n"
 
         # 검색 결과로 답변 생성
         try:

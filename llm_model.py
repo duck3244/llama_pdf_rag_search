@@ -30,6 +30,9 @@ def initialize_llm_model(model_path: str = LLAMA_MODEL_PATH):
     model.eval()  # 추론 모드로 설정
 
     # 파이프라인 생성
+    # return_full_text=False: 프롬프트가 응답에 포함되지 않도록 한다.
+    #   그렇지 않으면 프롬프트에 포함된 "...찾을 수 없습니다" 문구 때문에
+    #   rag_system의 폴백 판정이 항상 참으로 오작동한다.
     pipe = pipeline(
         "text-generation",
         model=model,
@@ -37,7 +40,8 @@ def initialize_llm_model(model_path: str = LLAMA_MODEL_PATH):
         max_new_tokens=MAX_NEW_TOKENS,
         temperature=TEMPERATURE,
         repetition_penalty=1.1,
-        batch_size=1  # CPU에서는 작은 배치 사이즈
+        batch_size=1,
+        return_full_text=False,
     )
 
     # LangChain 모델 생성
